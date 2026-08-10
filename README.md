@@ -1,801 +1,1040 @@
-# FPGA Image Processing System
+# STM32 WS2812B LED Light Show & Music Visualization
 
-> **Project:** Hardware Implementation of Image Processing Algorithms on FPGA  
-> **Course:** CE213 — Computer Engineering Project  
-> **FPGA Platform:** DE2  
-> **HDL:** Verilog HDL  
-> **Simulation:** ModelSim-Altera
+> **Project:** Điều khiển dải đèn LED WS2812B bằng vi điều khiển STM32  
+> **MCU:** STM32F407VET6  
+> **LED:** WS2812B — 60 LEDs  
+> **Audio sensor:** LM393  
+> **Development environment:** STM32CubeIDE  
+> **Main features:** LED effects, audio-reactive lighting, FFT frequency analysis
 
-This README documents **Chapter 2, Chapter 3, and Chapter 4** of the project report.
+This README summarizes **Chapter 2, Chapter 3, and Chapter 4** of the project report.
 
-The project implements three image-processing algorithms in hardware:
+The project uses an STM32 microcontroller to control a WS2812B RGB LED strip. In addition to conventional lighting effects, the system can analyze an audio signal and visualize both **sound intensity** and **frequency components** on the LED strip. The report identifies STM32F407VET6, a 60-LED WS2812B strip, an LM393 audio-sensor module, push buttons, a breadboard, and a CP2102 USB-to-TTL interface as the main hardware. fileciteturn5file0L257-L274
 
-- RGB to Grayscale
-- Median Filter
-- Histogram Equalization
-
-The README focuses on the **theoretical background, system architecture, hardware design, algorithms, simulation results, and practical implementation**. **Verilog source code is intentionally not included.**
+> **Note:** This README focuses on the architecture, theory, algorithms, flowcharts, and hardware design. **Source code is intentionally not included.**
 
 ---
 
 # CHAPTER 2 — THEORETICAL BACKGROUND
 
-## 2.1 Digital Image Processing
+## 2.1 WS2812B Operating Principle
 
-Digital Image Processing is the study of methods for processing, analyzing, and improving digital images using computers or digital hardware.
+WS2812B is an addressable RGB LED device that integrates:
 
-A digital image is represented as a matrix of pixels. Each pixel contains information about the intensity or color at its corresponding position.
+- Red, Green, and Blue LED elements.
+- An internal data receiver.
+- PWM control circuitry.
+- Data input (`DIN`) and data output (`DOUT`).
 
-The main objectives of image processing in this project are:
+Each LED receives its own color information, keeps the 24 bits intended for itself, and forwards the remaining data to the next LED in the chain. fileciteturn5file0L158-L166
 
-- Improve image quality.
-- Remove image noise.
-- Increase image contrast.
-- Prepare image data for further processing and analysis.
-
-Digital image processing is widely used in applications such as:
-
-- Surveillance cameras
-- Medical imaging
-- Autonomous vehicles
-- Face recognition
-- Industrial automation
-- Artificial intelligence
-
----
-
-## 2.2 RGB to Grayscale
-
-A color RGB image consists of three channels:
-
-- **R — Red**
-- **G — Green**
-- **B — Blue**
-
-Each color channel is represented by 8 bits. Therefore, one RGB pixel contains:
-
-\[
-8 + 8 + 8 = 24\text{ bits}
-\]
-
-The RGB pixel is represented as:
+### WS2812B data chain
 
 ```text
-R [23:16] | G [15:8] | B [7:0]
+MCU
+ │
+ │ Serial Data
+ ▼
+┌─────────┐     ┌─────────┐     ┌─────────┐
+│ LED 1   │────►│ LED 2   │────►│ LED 3   │────► ...
+│ DIN DOUT│     │ DIN DOUT│     │ DIN DOUT│
+└─────────┘     └─────────┘     └─────────┘
 ```
 
-The image is first represented in bitmap form and each pixel is separated into its three color components.
+This daisy-chain architecture allows the MCU to control a large number of LEDs using a single data signal.
 
-The grayscale value is calculated using the standard luminance model:
+---
 
-\[
-Y = 0.299R + 0.587G + 0.114B
-\]
+## 2.2 WS2812B 1-Wire Protocol
 
-The coefficients reflect the different contributions of the RGB channels to perceived brightness.
-
-A brightness parameter can also be applied to adjust the resulting grayscale value.
-
-### RGB-to-Grayscale processing flow
+WS2812B uses a high-speed single-wire protocol with strict timing. The nominal data rate is approximately **800 kHz**, and each LED requires **24 bits** of color information. The normal color order used by WS2812B is:
 
 ```text
-             RGB Pixel
-                 │
-        ┌────────┼────────┐
-        ▼        ▼        ▼
-        R        G        B
-        │        │        │
-        └────────┼────────┘
-                 ▼
-       Luminance Calculation
-                 │
-                 ▼
-       Brightness Adjustment
-                 │
-                 ▼
-        8-bit Grayscale Pixel
+GRB = Green + Red + Blue
 ```
 
-![RGB to Grayscale Formula](images/image5.png)
+For a strip containing `N` LEDs, the MCU transmits:
 
-*Figure 2.1 — RGB to Grayscale luminance formula.*
+\[
+24N \text{ bits}
+\]
+
+For the 60-LED strip used in this project:
+
+\[
+24 \times 60 = 1440\text{ bits/frame}
+\]
+
+The report specifies that each bit occupies approximately **1.25 µs**. fileciteturn5file0L167-L179
 
 ---
 
-## 2.3 Median Filter
+## 2.3 Bit Encoding
 
-The Median Filter is a nonlinear filtering technique commonly used for image-noise reduction.
+A WS2812B data bit is encoded by the duration of the HIGH and LOW portions of the waveform.
 
-It is particularly effective for:
-
-- Salt-and-pepper noise
-- Speckle noise
-
-The algorithm uses a **3 × 3 sliding window**.
-
-For each pixel:
-
-1. A 3 × 3 neighborhood is selected.
-2. The nine pixel values are collected.
-3. The nine values are sorted.
-4. The middle value is selected as the median.
-5. The median value becomes the output pixel.
-
-### Median-filter concept
+### Logic `0`
 
 ```text
-3 × 3 Window
-     │
-     ▼
-9 Pixel Values
-     │
-     ▼
-Sort Values
-     │
-     ▼
-Select Middle Value
-     │
-     ▼
-Output Pixel
+HIGH ≈ 0.35–0.45 µs
+LOW  ≈ 0.80–0.90 µs
+Total ≈ 1.25 µs
 ```
 
-![Median Sorting Concept](images/image6.png)
-
-*Figure 2.2 — Concept of sorting values for median selection.*
-
-![3x3 Median Example](images/image7.png)
-
-*Figure 2.3 — Example of selecting the median value in a 3 × 3 window.*
-
-### Sort Network
-
-To accelerate the sorting operation on FPGA, the design uses a **Sort Network**.
-
-A Sort Network is a fixed network of comparator elements. The comparison structure is predetermined and therefore does not depend on intermediate data values.
-
-This makes it well suited to FPGA hardware because:
-
-- Comparisons can be performed in parallel.
-- The comparison structure is deterministic.
-- The architecture can be implemented as fixed combinational hardware.
-- The latency is predictable.
-
-![Sort Network](images/image8.png)
-
-*Figure 2.4 — Sort Network used for the Median Filter.*
-
----
-
-## 2.4 Histogram Equalization
-
-Histogram Equalization is an image-enhancement technique used to improve image contrast by redistributing grayscale values.
-
-For an 8-bit grayscale image:
-
-\[
-0 \leq r \leq 255
-\]
-
-A histogram represents the frequency distribution of the grayscale values.
-
-- A narrow histogram generally indicates low contrast.
-- A wider histogram generally indicates higher contrast.
-
-![Histogram Contrast Example](images/image9.png)
-
-*Figure 2.5 — Example of images and histograms with different contrast levels.*
-
-### 2.4.1 Histogram Generation
-
-The first step is to count the number of occurrences of every grayscale value.
-
-For an 8-bit image, the histogram contains **256 bins**, corresponding to grayscale levels 0–255.
-
-The probability distribution is then obtained from the frequency of each grayscale level.
-
----
-
-### 2.4.2 Cumulative Distribution Function
-
-After obtaining the histogram, the **Cumulative Distribution Function (CDF)** is calculated.
-
-The CDF represents the accumulated probability from grayscale level 0 to the current grayscale level.
-
-\[
-CDF(r_k)=\sum_{j=0}^{k}p(r_j)
-\]
-
-where \(p(r_j)\) is the probability of occurrence of grayscale level \(r_j\).
-
-![CDF Formula](images/image10.png)
-
-*Figure 2.6 — Cumulative Distribution Function.*
-
-The CDF increases monotonically from 0 to 1 and is used to generate the grayscale transformation.
-
----
-
-### 2.4.3 Grayscale Mapping
-
-The new grayscale value is calculated from the CDF:
-
-\[
-s_k=(L-1)\times CDF(r_k)
-\]
-
-For an 8-bit grayscale image:
-
-\[
-L=256
-\]
-
-Therefore:
-
-\[
-s_k=255\times CDF(r_k)
-\]
-
-![Histogram Mapping Formula](images/image11.png)
-
-*Figure 2.7 — Grayscale mapping based on the CDF.*
-
-The resulting value is rounded to an integer and used as the new pixel value.
-
-### Histogram Equalization flow
+### Logic `1`
 
 ```text
-Input Grayscale Image
-          │
-          ▼
-   Generate Histogram
-          │
-          ▼
- Probability Distribution
-          │
-          ▼
-       Calculate CDF
-          │
-          ▼
-   Generate Gray Mapping
-          │
-          ▼
-      Output Image
+HIGH ≈ 0.70–0.80 µs
+LOW  ≈ 0.45–0.55 µs
+Total ≈ 1.25 µs
 ```
 
-The final result redistributes the grayscale values and improves the overall image contrast.
+The report uses the same approximately 1.25 µs bit period for both logic states, while changing the HIGH/LOW ratio to represent `0` or `1`. fileciteturn5file0L181-L193
+
+### Timing concept
+
+```text
+Logic 0:
+
+      ┌─────┐
+______│     │________________
+      HIGH        LOW
+
+   ≈ 0.4 µs     ≈ 0.85 µs
+
+
+Logic 1:
+
+      ┌─────────┐
+______│         │____________
+      HIGH          LOW
+
+   ≈ 0.8 µs       ≈ 0.45 µs
+```
+
+---
+
+## 2.4 Reset / Latch
+
+After all 24 bits for all LEDs have been transmitted, the data line must remain LOW for at least **50 µs**.
+
+This LOW interval acts as the reset/latch period and causes the LEDs to apply the received color values. fileciteturn5file0L194-L197
+
+```text
+Data stream
+████████████████████████████████
+                               │
+                               ▼
+                         LOW ≥ 50 µs
+                               │
+                               ▼
+                         LED LATCH
+```
+
+---
+
+## 2.5 WS2812B Data Transmission Flow
+
+The complete transmission process can be summarized as:
+
+```text
+Create GRB Color Buffer
+          │
+          ▼
+For each LED
+          │
+          ▼
+Transmit G[7:0]
+          │
+          ▼
+Transmit R[7:0]
+          │
+          ▼
+Transmit B[7:0]
+          │
+          ▼
+Continue until LED N
+          │
+          ▼
+LOW ≥ 50 µs
+          │
+          ▼
+LEDs Update Display
+```
+
+The report describes the color buffer as an array containing three bytes per LED and transmitting the color data sequentially from LED 1 to LED N. fileciteturn5file0L198-L212
+
+---
+
+# 2.6 FFT Fundamentals
+
+The advanced part of the project uses **FFT (Fast Fourier Transform)** to analyze the frequency content of the audio signal.
+
+## 2.6.1 DFT
+
+The Discrete Fourier Transform converts a discrete signal from the time domain into the frequency domain.
+
+For a signal \(x[n]\), the DFT is:
+
+\[
+X[k]=\sum_{n=0}^{N-1}x[n]e^{-j2\pi kn/N}
+\]
+
+Direct DFT computation has approximately:
+
+\[
+O(N^2)
+\]
+
+computational complexity.
+
+---
+
+## 2.6.2 FFT
+
+FFT is an efficient algorithm for computing the DFT.
+
+Instead of the \(O(N^2)\) complexity of direct DFT, FFT reduces the computational complexity to approximately:
+
+\[
+O(N\log N)
+\]
+
+This makes FFT suitable for real-time signal analysis on an MCU. fileciteturn5file0L223-L231
+
+---
+
+## 2.6.3 Radix-2 FFT
+
+The project uses the Radix-2 FFT concept.
+
+For \(N\) being a power of two, the input is divided into:
+
+```text
+Input Signal
+     │
+     ├───────────────┐
+     ▼               ▼
+ Even Samples     Odd Samples
+     │               │
+     ▼               ▼
+   FFT               FFT
+     │               │
+     └───────┬───────┘
+             ▼
+          Combine
+             │
+             ▼
+         X[k] Spectrum
+```
+
+The algorithm repeatedly divides the signal into even and odd-indexed samples, computes the smaller FFTs recursively, and combines the results. fileciteturn5file0L232-L244
+
+---
+
+## 2.6.4 FFT Output
+
+The FFT produces complex frequency-domain values:
+
+\[
+X[k] = Re\{X[k]\}+jIm\{X[k]\}
+\]
+
+From these values, the magnitude of each frequency component can be calculated.
+
+```text
+FFT Output
+    │
+    ├── Real
+    └── Imaginary
+          │
+          ▼
+      Magnitude
+          │
+          ▼
+   Frequency Spectrum
+```
+
+The magnitude represents the strength of each frequency component, while the phase represents its phase relationship. fileciteturn5file0L245-L248
+
+---
+
+## 2.6.5 Applications of FFT
+
+FFT can be used for:
+
+- Audio analysis
+- Speech recognition
+- Digital filtering
+- Radar and sonar processing
+- Frequency-domain signal processing
+
+In this project, FFT is used specifically for **audio frequency analysis and music visualization**. fileciteturn5file0L249-L254
 
 ---
 
 # CHAPTER 3 — SYSTEM DESIGN
 
-## 3.1 System Block Diagram
+## 3.1 Hardware Architecture
 
-The FPGA image-processing system follows a **sequential processing architecture**.
+The hardware system is built around the **STM32F407VET6** microcontroller.
 
-The main hardware processing stages are:
-
-1. RGB to Grayscale
-2. Median Filter
-3. Histogram Equalization
-
-The input image is transferred from the PC to the FPGA and stored in SDRAM. The image data then passes through the processing modules sequentially before the resulting image is stored and transferred back to the PC.
-
-![System Block Diagram](images/image12.png)
-
-*Figure 3.1 — Overall FPGA image-processing system.*
-
-### Main system components
+Main components:
 
 | Component | Function |
 |---|---|
-| **Nios II** | Controls data flow and interfaces with SDRAM/JTAG UART |
-| **SDRAM** | Stores input, intermediate, and output image data |
-| **JTAG UART / JTAG interface** | Provides communication between PC and FPGA system |
-| **RGB to Gray** | Converts RGB pixels to 8-bit grayscale |
-| **Median Filter** | Reduces image noise |
-| **Histogram Equalization** | Enhances image contrast |
+| **STM32F407VET6** | Main processing and control unit |
+| **WS2812B × 60** | RGB LED display |
+| **LM393 audio sensor** | Audio signal input |
+| **Push buttons** | Mode/effect control |
+| **Breadboard** | Hardware interconnection |
+| **CP2102 USB-to-TTL** | Serial communication / debugging |
 
-### Overall data flow
+These components are identified in the report's system design chapter. fileciteturn5file0L257-L265
 
-```text
-                    PC
-                     │
-                     │ Image Data
-                     ▼
-              JTAG Communication
-                     │
-                     ▼
-                   SDRAM
-                     │
-                     ▼
-              RGB to Grayscale
-                     │
-                     ▼
-               Median Filter
-                     │
-                     ▼
-           Histogram Equalization
-                     │
-                     ▼
-                   SDRAM
-                     │
-                     ▼
-                     PC
-```
+### Hardware overview
+
+![STM32F407VET6 Development Board](images/image4.png)
+
+![WS2812B LED Strip](images/image5.png)
+
+![Audio Sensor Module](images/image6.png)
+
+![STM32F407VET6 Pinout](images/image11.png)
 
 ---
 
-# 3.2 Module Design
+## 3.2 System Block Diagram
 
-## 3.2.1 RGB to Gray Module
-
-The RGB to Gray module receives a 24-bit RGB pixel and produces an 8-bit grayscale pixel.
-
-The processing consists of:
+The complete system can be represented as:
 
 ```text
-R [23:16]
-G [15:8]       ──► Luminance Calculation ──► Brightness ──► Grayscale
-B [7:0]
+                       ┌──────────────────────┐
+                       │   STM32F407VET6      │
+                       │    Microcontroller   │
+                       └──────────┬───────────┘
+                                  │
+              ┌───────────────────┼───────────────────┐
+              │                   │                   │
+              ▼                   ▼                   ▼
+       ┌────────────┐      ┌────────────┐      ┌────────────┐
+       │ Push       │      │ Audio      │      │ WS2812B    │
+       │ Buttons    │      │ Sensor     │      │ 60 LEDs    │
+       └────────────┘      │ LM393      │      └────────────┘
+                           └─────┬──────┘
+                                 │
+                                 ▼
+                               ADC
+                                 │
+                                 ▼
+                               FFT
 ```
 
-The module implements the luminance equation described in Chapter 2 and produces the grayscale image used by the subsequent processing stages.
-
-![RGB to Gray Hardware](images/image13.png)
-
-*Figure 3.2 — Hardware structure of the RGB to Gray module.*
+The STM32 receives user input through push buttons, receives audio information from the sensor, processes the signal, and generates the appropriate LED data.
 
 ---
 
-## 3.2.2 Median Filter Module
+## 3.3 MCU Configuration
 
-The Median Filter module processes a 3 × 3 image window.
+The STM32F407VET6 is configured to provide the peripherals required by the system.
 
-The implementation is divided into hardware comparison/sorting stages.
+The project uses:
 
-### Swap / Comparator Network
+- GPIO
+- External Interrupts
+- ADC
+- Timer/PWM
+- DMA
+- UART
+- Clock system
 
-The first stage performs pairwise comparisons and swaps to establish the required ordering relationships between the pixel values.
+The system configuration and pin assignment are developed using STM32CubeMX / STM32CubeIDE.
 
-![Median Swap Network](images/image14.png)
+### System configuration
 
-*Figure 3.3 — Comparator/swap network of the Median Filter.*
+![System Configuration](images/image13.png)
 
-### Sorting Structure
+### Pinout
 
-Multiple comparator stages are connected to obtain the required ordering of the nine pixel values.
+![STM32F407VET6 Pinout](images/image12.png)
 
-![Median Sorting Hardware](images/image15.png)
+### Clock configuration
 
-*Figure 3.4 — Hardware sorting structure used in the Median Filter.*
-
-### Median Extraction
-
-After the values have been ordered, the center value is selected as the median.
-
-The overall hardware flow is:
-
-```text
-3 × 3 Pixel Window
-        │
-        ▼
-  Pixel Comparators
-        │
-        ▼
-   Sorting Stages
-        │
-        ▼
- Median Extraction
-        │
-        ▼
- Filtered Pixel
-```
-
-![Median Filter Algorithm](images/image16.png)
-
-*Figure 3.5 — Median Filter processing flow.*
+![Clock Configuration](images/image14.png)
 
 ---
 
-## 3.2.3 Histogram Equalization Module
+## 3.4 LED Control Interface
 
-The Histogram Equalization implementation is divided into three major hardware functions:
+The WS2812B strip is controlled through a single data line.
 
-1. Histogram generation
-2. CDF / LUT generation
-3. Pixel equalization
-
-### Histogram
-
-The Histogram stage counts the frequency of each 8-bit grayscale value.
+The basic architecture is:
 
 ```text
-Input Pixel
-    │
-    ▼
-Grayscale Value
-    │
-    ▼
-Select Histogram Bin
-    │
-    ▼
-Increment Frequency
+STM32
+  │
+  │ PWM + DMA
+  ▼
+WS2812B DIN
+  │
+  ▼
+LED 1 → LED 2 → LED 3 → ... → LED 60
 ```
 
-![Histogram Hardware](images/image17.png)
+The project uses **PWM + DMA** to generate the required WS2812B timing while reducing CPU workload.
 
-*Figure 3.6 — Histogram Equalization hardware structure.*
-
-### CDF and LUT
-
-After histogram generation, the cumulative distribution is calculated.
-
-The CDF is then converted into a lookup table containing the new grayscale value for each input grayscale level.
-
-```text
-Histogram
-    │
-    ▼
-Cumulative Sum
-    │
-    ▼
-CDF
-    │
-    ▼
-Grayscale Mapping
-    │
-    ▼
-LUT
-```
-
-![CDF / LUT Processing](images/image18.png)
-
-*Figure 3.7 — CDF/LUT processing flow.*
-
-### Equalization
-
-For each input pixel, its grayscale value is used as an index into the LUT.
-
-```text
-Input Grayscale Pixel
-          │
-          ▼
-       LUT Index
-          │
-          ▼
- Equalized Gray Value
-          │
-          ▼
-      Output Pixel
-```
-
-![Equalization Hardware](images/image19.png)
-
-*Figure 3.8 — Equalization hardware structure.*
-
----
-
-# 3.3 Image Memory and Storage
-
-SDRAM is used as the main image-data storage area.
-
-It stores:
-
-- Input image
-- Intermediate images
-- Processed/output images
-
-The SDRAM also acts as a buffer between the hardware processing modules.
-
-### Image representation
-
-The grayscale image uses:
+For 60 LEDs:
 
 \[
-8\text{ bits/pixel}=1\text{ byte/pixel}
+60\times24=1440\text{ data bits}
 \]
 
-Therefore, each grayscale pixel occupies one byte in SDRAM.
-
-### Data organization
-
-A conceptual memory organization is:
-
-```text
-SDRAM
-│
-├── Input Image
-│
-├── Intermediate Image
-│
-└── Output Image
-```
-
-### PC → FPGA
-
-The report uses Intel Quartus System Console together with Tcl scripting and a JTAG Avalon Master Bridge to transfer image data.
-
-The image is converted into a binary file:
-
-```text
-.jpg
- │
- ▼
-Grayscale / Binary Conversion
- │
- ▼
-.bin
- │
- ▼
-System Console + JTAG
- │
- ▼
-SDRAM
-```
-
-Each grayscale pixel corresponds to one byte in the binary file.
-
-### FPGA → PC
-
-After processing:
-
-```text
-SDRAM
-  │
-  ▼
-Output .bin
-  │
-  ▼
-System Console
-  │
-  ▼
-PC
-  │
-  ▼
-Python + Pillow
-  │
-  ▼
-Output Image
-```
-
-The report uses the System Console read operation to retrieve the output binary data from SDRAM and reconstruct the image on the PC.
+The transmission buffer therefore contains the PWM representation of these bits plus additional slots used to create the reset interval.
 
 ---
 
-# 3.4 Overall Algorithm
+## 3.5 Audio Input
 
-The complete image-processing system follows this sequence:
-
-![Overall Algorithm](images/image20.png)
-
-*Figure 3.9 — Overall image-processing algorithm.*
+The audio sensor provides an analog signal to the STM32 ADC.
 
 ```text
-Receive Image from PC
-          │
-          ▼
-   RGB → Grayscale
-          │
-          ▼
-    Median Filter
-          │
-          ▼
-Histogram Equalization
-          │
-          ▼
-    Store Result
-          │
-          ▼
-     Output Image
+Sound
+  │
+  ▼
+Microphone / Audio Sensor
+  │
+  ▼
+LM393 Module
+  │
+  ▼
+ADC
+  │
+  ▼
+Digital Samples
+  │
+  ▼
+DSP / FFT
 ```
+
+The audio data can then be analyzed in two different ways:
+
+1. **Amplitude analysis** — determines how loud the sound is.
+2. **Frequency analysis** — determines which frequency components are dominant.
+
+---
+
+## 3.6 Timer, PWM and DMA
+
+The LED communication requires accurate timing.
+
+The project therefore uses PWM to generate the waveform and DMA to continuously feed the PWM data buffer to the timer.
+
+Conceptually:
+
+```text
+LED Color Data
+      │
+      ▼
+PWM Encoding
+      │
+      ▼
+PWM Buffer
+      │
+      ▼
+DMA
+      │
+      ▼
+Timer / PWM Channel
+      │
+      ▼
+WS2812B Data Line
+```
+
+The report specifies a PWM frequency of approximately **800 kHz**, corresponding to a bit period of approximately **1.25 µs**. fileciteturn5file0L279-L305
+
+---
+
+# CHAPTER 4 — PROGRAMMING AND ALGORITHMS
+
+## 4.1 Main Program Flow
+
+The main program initializes the MCU peripherals and then continuously executes the selected LED mode.
+
+The system supports two major operating modes:
+
+```text
+                    START
+                      │
+                      ▼
+              Initialize MCU
+                      │
+                      ▼
+            Initialize Peripherals
+                      │
+                      ▼
+               Read User Mode
+                      │
+          ┌───────────┴───────────┐
+          ▼                       ▼
+      No Music                 Music Mode
+          │                       │
+          ▼                       ▼
+   LED Effects             Audio Processing
+          │                       │
+          └───────────┬───────────┘
+                      ▼
+                 Update LEDs
+                      │
+                      ▼
+                    LOOP
+```
+
+![Main Program Flowchart](images/image16.png)
+
+---
+
+# 4.2 WS2812B Color Data Transmission
+
+The LED-control algorithm converts the color value of each LED into a PWM waveform.
+
+Each LED requires:
+
+\[
+24\text{ bits}=8G+8R+8B
+\]
+
+The data is sent in **GRB order**.
+
+### Bit encoding
+
+```text
+Color Bit
+   │
+   ├── 1 ──► Longer HIGH pulse
+   │
+   └── 0 ──► Shorter HIGH pulse
+             │
+             ▼
+          PWM Output
+```
+
+The report uses approximately:
+
+```text
+Bit 1 → HIGH ≈ 0.8 µs
+Bit 0 → HIGH ≈ 0.4 µs
+Bit period ≈ 1.25 µs
+```
+
+After all LEDs are transmitted, additional LOW PWM slots generate the reset interval. fileciteturn5file0L279-L305
+
+---
+
+# 4.3 Button / External Interrupt Control
+
+The system uses external interrupts to detect button presses.
+
+The buttons are used to:
+
+- Change the LED effect.
+- Adjust effect speed.
+- Switch between normal lighting and music-reactive mode.
+
+### Button-control flow
+
+```text
+Button Press
+     │
+     ▼
+External Interrupt
+     │
+     ▼
+Interrupt Callback
+     │
+     ├── Mode Button
+     │      └── Change Effect
+     │
+     ├── Speed Button
+     │      └── Change Speed
+     │
+     └── Music Button
+            └── Toggle Music Mode
+```
+
+The report describes the interrupt callback as the mechanism for changing the effect, adjusting speed, and switching between non-music and music modes. fileciteturn5file0L306-L315
+
+---
+
+# 4.4 Non-Music LED Effects
+
+## 4.4.1 Rainbow Effect
+
+The Rainbow Effect assigns colors across the LED strip according to the RGB color spectrum.
+
+The color distribution moves over time, producing the visual effect of a moving rainbow.
+
+### Algorithm
+
+```text
+Start
+  │
+  ▼
+Initialize Effect Step
+  │
+  ▼
+For LED 0 → 59
+  │
+  ▼
+Calculate Color Index
+  │
+  ▼
+Select RGB Color
+  │
+  ▼
+Write LED Color
+  │
+  ▼
+Increase Effect Step
+  │
+  ▼
+Repeat
+```
+
+The 60 LEDs are divided into three 20-LED regions, and the colors cycle through red, green, and blue. fileciteturn5file0L316-L335
+
+![Rainbow Effect Flowchart](images/image21.png)
+
+---
+
+## 4.4.2 Single Color Change
+
+The Single Color Change effect gradually increases the brightness of the primary colors.
+
+The sequence is:
+
+```text
+Red
+ │
+ ▼
+Green
+ │
+ ▼
+Blue
+ │
+ ▼
+Red
+ │
+ ▼
+...
+```
+
+Each selected color increases from approximately 0 to 255 before the algorithm switches to the next color.
+
+![Single Color Change Flowchart](images/image24.png)
+
+---
+
+## 4.4.3 Strobe Effect
+
+The Strobe Effect combines gradual color increase with a flashing stage.
+
+### Processing flow
+
+```text
+Select Color
+    │
+    ▼
+Increase Brightness
+    │
+    ▼
+Brightness = Maximum?
+    │
+    ├── No ──► Continue
+    │
+    └── Yes
+          │
+          ▼
+       LEDs OFF
+          │
+          ▼
+     Select Next Color
+          │
+          ▼
+        Repeat
+```
+
+The effect cycles through red, green, and blue while periodically turning the LEDs off to create the strobe effect. fileciteturn5file0L355-L367
+
+![Strobe Flowchart](images/image27.png)
+
+---
+
+## 4.4.4 Pixel Run
+
+Pixel Run creates a moving light point along the 60-LED strip.
+
+At each step:
+
+- One LED is illuminated.
+- The remaining LEDs are turned off.
+- The active position moves to the next LED.
+
+```text
+LED 1 → LED 2 → LED 3 → ... → LED 60
+  ●        ●        ●              ●
+```
+
+![Pixel Run Flowchart](images/image29.png)
+
+---
+
+# 4.5 Music Visualization
+
+The music mode combines ADC sampling, signal processing, FFT analysis, and LED control.
+
+The overall processing chain is:
+
+```text
+Audio Signal
+     │
+     ▼
+ADC Sampling
+     │
+     ▼
+DMA Buffer
+     │
+     ▼
+Signal Preprocessing
+     │
+     ▼
+FFT
+     │
+     ▼
+Magnitude Spectrum
+     │
+     ├───────────────┐
+     ▼               ▼
+Amplitude        Frequency
+Analysis         Analysis
+     │               │
+     ▼               ▼
+LED Number        LED Color /
+or Brightness     Frequency Bands
+     │               │
+     └───────┬───────┘
+             ▼
+         WS2812B LEDs
+```
+
+---
+
+# 4.6 Dominant Frequency Detection
+
+The dominant-frequency algorithm determines the strongest frequency component of the audio signal.
 
 ### Processing steps
 
-1. Receive image data from the computer.
-2. Convert the RGB image to grayscale.
-3. Apply the Median Filter to reduce noise.
-4. Apply Histogram Equalization to improve contrast.
-5. Store the processed image.
-6. Transfer the result back to the PC.
+1. Acquire analog audio samples through ADC.
+2. Convert samples to numerical data.
+3. Perform FFT.
+4. Calculate the magnitude spectrum.
+5. Search for the maximum magnitude.
+6. Convert the corresponding FFT bin to frequency.
 
----
+The project uses:
 
-# CHAPTER 4 — SIMULATION AND EXPERIMENTAL RESULTS
+| Parameter | Value |
+|---|---:|
+| FFT size | 1024 |
+| Sampling rate | 44.1 kHz |
+| Nyquist frequency | 22.05 kHz |
+| FFT result | Complex spectrum |
+| Output | Dominant frequency |
 
-## 4.1 Simulation Environment
+The report specifies `FFT_SIZE = 1024` and `SAMPLE_RATE = 44100 Hz`, with the Nyquist limit at half the sampling frequency. fileciteturn5file0L389-L416
 
-The individual image-processing algorithms were simulated using **ModelSim-Altera**.
-
-The simulations verify the functional behavior of:
-
-- RGB to Grayscale
-- Median Filter
-- Histogram Equalization
-- Combined Median Filter + Histogram Equalization
-
-The results are evaluated by comparing the input image with the corresponding processed image.
-
----
-
-## 4.1.1 RGB to Grayscale Simulation
-
-The first simulation evaluates the RGB-to-Grayscale conversion.
-
-### Input image
-
-The original color image is used as the input to the grayscale conversion process.
-
-![RGB Input](images/image23.jpeg)
-
-*Figure 4.1 — RGB input image.*
-
-### Grayscale output
-
-The RGB image is converted into an 8-bit grayscale image.
-
-![Grayscale Output](images/image24.jpeg)
-
-*Figure 4.2 — Image after RGB-to-Grayscale conversion.*
-
-The result demonstrates that the color information has been converted into grayscale intensity information while preserving the main visual structure of the original image.
-
----
-
-## 4.1.2 Median Filter Simulation
-
-The Median Filter is evaluated using an image containing noise.
-
-### Input image
-
-![Median Filter Input](images/image25.jpeg)
-
-*Figure 4.3 — Input image used for Median Filter simulation.*
-
-### Filtered image
-
-![Median Filter Output](images/image26.jpeg)
-
-*Figure 4.4 — Image after Median Filter processing.*
-
-The Median Filter reduces unwanted noise while maintaining the main structures and edges of the image.
-
----
-
-## 4.1.3 Histogram Equalization — Test Case 1
-
-The first Histogram Equalization test evaluates contrast enhancement on a low-light image.
-
-### Input image
-
-![Histogram Test 1 Input](images/image27.jpeg)
-
-*Figure 4.5 — Input image for Histogram Equalization test case 1.*
-
-### Equalized image
-
-![Histogram Test 1 Output](images/image28.jpeg)
-
-*Figure 4.6 — Image after Histogram Equalization.*
-
-The equalization process expands the grayscale distribution and improves the visibility of details in darker regions.
-
----
-
-## 4.1.4 Histogram Equalization — Test Case 2
-
-A second test case is also used to verify the Histogram Equalization algorithm.
-
-### Input image
-
-![Histogram Test 2 Input](images/image23.jpeg)
-
-*Figure 4.7 — Input image for Histogram Equalization test case 2.*
-
-### Equalized image
-
-![Histogram Test 2 Output](images/image29.jpeg)
-
-*Figure 4.8 — Image after Histogram Equalization.*
-
-The result demonstrates the ability of the hardware implementation to modify the grayscale distribution and improve image contrast.
-
----
-
-## 4.1.5 Combined Median Filter and Histogram Equalization
-
-The complete processing flow combines the two image-enhancement stages:
+### Algorithm
 
 ```text
-Input Image
-     │
-     ▼
-Median Filter
-     │
-     ▼
-Noise-reduced Image
-     │
-     ▼
-Histogram Equalization
-     │
-     ▼
-Contrast-enhanced Image
+ADC Samples
+    │
+    ▼
+Normalize Samples
+    │
+    ▼
+1024-point FFT
+    │
+    ▼
+Calculate Magnitude
+    │
+    ▼
+Find Maximum Magnitude
+    │
+    ▼
+Find FFT Bin
+    │
+    ▼
+Calculate Frequency
+    │
+    ▼
+Dominant Frequency
 ```
 
-The combined processing demonstrates the intended sequence of the complete image-processing system.
+![Dominant Frequency Flowchart](images/image31.png)
 
 ---
 
-# 4.2 Experimental Implementation
+# 4.7 LED Number Based on Sound Amplitude
 
-The designed system is implemented on the **FPGA DE2 development board**.
+This algorithm controls the number of illuminated LEDs according to the loudness of the audio signal.
 
-The practical implementation includes:
-
-- FPGA hardware processing modules
-- Nios II system control
-- SDRAM image storage
-- JTAG-based image transfer
-- Hardware execution of the image-processing algorithms
-
-### Practical data flow
+### Processing
 
 ```text
-PC
- │
- │ Input Image
- ▼
-Convert to .bin
- │
- ▼
-JTAG / System Console
- │
- ▼
-DE2 SDRAM
- │
- ▼
-┌───────────────────────┐
-│ RGB → Grayscale       │
-├───────────────────────┤
-│ Median Filter         │
-├───────────────────────┤
-│ Histogram Equalization│
-└───────────────────────┘
- │
- ▼
-Output SDRAM
- │
- ▼
-JTAG / System Console
- │
- ▼
-.bin
- │
- ▼
-Python + Pillow
- │
- ▼
-Output Image
+ADC Samples
+     │
+     ▼
+Calculate RMS
+     │
+     ▼
+Sound Volume
+     │
+     ▼
+Map Volume → LED Count
+     │
+     ▼
+Enable Required LEDs
+     │
+     ▼
+Apply Rainbow Colors
 ```
 
-The report also provides a demonstration video of loading and running the system on the FPGA kit:
+The report uses multiple ADC samples, calculates the signal magnitude using RMS, maps the result to the number of LEDs to illuminate, and combines this with the rainbow effect. fileciteturn5file0L438-L450
 
-**Demo video:**  
-https://drive.google.com/file/d/1IRie2UMnT63qM29LWqt8eX0Edy-_F5cS/view?usp=drive_link
+![LED Number by Sound Flowchart](images/image34.png)
 
 ---
 
-# Summary
+# 4.8 LED Color Based on Sound Amplitude
 
-The project implements a complete FPGA-based image-processing pipeline consisting of:
+This algorithm maps sound intensity to LED color.
 
-| Stage | Function |
+The intended color transition is:
+
+```text
+Low Volume                      High Volume
+     │                                │
+     ▼                                ▼
+   Blue ─────────► Green ─────────► Red
+```
+
+The larger the sound amplitude, the warmer the resulting LED color becomes.
+
+The algorithm normalizes the measured volume to a ratio and uses that ratio to interpolate between RGB color regions. fileciteturn5file0L455-L470
+
+![LED Color by Sound Flowchart](images/image37.png)
+
+---
+
+# 4.9 Single-Frequency Visualization
+
+The `One_Frequence` mode uses the dominant frequency calculated from FFT.
+
+### Processing flow
+
+```text
+ADC Sampling
+     │
+     ▼
+FFT
+     │
+     ▼
+Dominant Frequency
+     │
+     ▼
+Map Frequency → LED Count
+     │
+     ▼
+Display on LED Strip
+     │
+     ▼
+Send Frequency through UART
+```
+
+The report describes using Timer 2 for sampling, obtaining the dominant frequency through FFT, mapping the result to the number of LEDs, and outputting the measured frequency through UART for observation/debugging. fileciteturn5file0L474-L484
+
+![Single Frequency Flowchart](images/image39.png)
+
+---
+
+# 4.10 Three-Band Frequency Visualization
+
+The most advanced music mode divides the frequency spectrum into three regions:
+
+- **Bass**
+- **Mid**
+- **Treble**
+
+The 60-LED strip is also divided into three regions:
+
+```text
+┌────────────────┬────────────────┬────────────────┐
+│     BASS       │      MID       │     TREBLE     │
+│    20 LEDs     │    20 LEDs     │    20 LEDs     │
+│     BLUE       │     GREEN      │      RED       │
+└────────────────┴────────────────┴────────────────┘
+```
+
+### Processing flow
+
+```text
+                  Audio Signal
+                       │
+                       ▼
+                     ADC
+                       │
+                       ▼
+                      FFT
+                       │
+                       ▼
+              Magnitude Spectrum
+                       │
+        ┌──────────────┼──────────────┐
+        ▼              ▼              ▼
+      BASS            MID           TREBLE
+        │              │              │
+        ▼              ▼              ▼
+ Max Frequency    Max Frequency    Max Frequency
+        │              │              │
+        ▼              ▼              ▼
+   Blue LEDs      Green LEDs       Red LEDs
+    0–19          20–39            40–59
+```
+
+For each band, the algorithm finds the strongest frequency component and uses its magnitude to determine LED brightness. The report divides the 60 LEDs into three groups of 20, with blue for bass, green for mid, and red for treble. fileciteturn5file0L489-L509
+
+![Three-Band Frequency Flowchart](images/image42.png)
+
+---
+
+# 4.11 Complete Algorithm Overview
+
+The complete project can be summarized by the following architecture:
+
+```text
+                         ┌───────────────┐
+                         │     START     │
+                         └───────┬───────┘
+                                 │
+                                 ▼
+                    ┌──────────────────────┐
+                    │ Initialize STM32     │
+                    │ GPIO / ADC / Timer   │
+                    │ DMA / UART / PWM     │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                     ┌──────────────────┐
+                     │ Select LED Mode  │
+                     └────────┬─────────┘
+                              │
+              ┌───────────────┴────────────────┐
+              │                                │
+              ▼                                ▼
+       ┌─────────────┐                 ┌──────────────┐
+       │ No Music    │                 │ Music Mode   │
+       └──────┬──────┘                 └──────┬───────┘
+              │                               │
+       ┌──────┼─────────┐              ┌──────┴─────────┐
+       ▼      ▼         ▼              ▼                ▼
+    Rainbow Single   Strobe/        Volume          Frequency
+             Color   Pixel Run      Analysis         Analysis
+                                      │                │
+                                      ▼                ▼
+                                 LED Count       FFT / Spectrum
+                                      │                │
+                                      └───────┬────────┘
+                                              ▼
+                                      Update WS2812B
+                                              │
+                                              ▼
+                                            LOOP
+```
+
+---
+
+# Hardware–Software Interaction
+
+The project combines low-level MCU peripherals with software algorithms:
+
+| Hardware / Peripheral | Role |
 |---|---|
-| **RGB to Grayscale** | Converts 24-bit RGB pixels to 8-bit grayscale |
-| **Median Filter** | Reduces image noise using a 3 × 3 window |
-| **Histogram Equalization** | Improves image contrast using histogram/CDF-based mapping |
-| **SDRAM** | Stores input, intermediate, and output image data |
-| **Nios II** | Controls system data flow |
-| **JTAG** | Transfers image data between PC and FPGA |
-| **ModelSim-Altera** | Verifies the processing algorithms |
+| **STM32F407VET6** | Executes the application and DSP algorithms |
+| **GPIO** | Button and control signals |
+| **EXTI** | Detects button presses |
+| **ADC** | Samples audio |
+| **DMA** | Transfers ADC/PWM data with low CPU overhead |
+| **Timer / PWM** | Generates WS2812B timing |
+| **UART** | Debugging and frequency monitoring |
+| **WS2812B** | Displays RGB effects and music visualization |
 
-The architecture therefore combines image-processing algorithms with dedicated FPGA hardware to create a complete hardware-based image-processing system.
+---
+
+# Key Parameters
+
+| Parameter | Value |
+|---|---:|
+| MCU | STM32F407VET6 |
+| LED type | WS2812B |
+| Number of LEDs | 60 |
+| LED data format | 24-bit GRB |
+| WS2812B data rate | ≈ 800 kHz |
+| WS2812B bit period | ≈ 1.25 µs |
+| Reset time | ≥ 50 µs |
+| FFT size | 1024 |
+| ADC sampling rate | 44.1 kHz |
+| Nyquist frequency | 22.05 kHz |
+| Frequency bands | Bass / Mid / Treble |
+| LED allocation | 20 LEDs per band |
+
+---
+
+# Repository Structure
+
+A recommended GitHub structure is:
+
+```text
+.
+├── README.md
+├── images/
+│   ├── image4.png
+│   ├── image5.png
+│   ├── image6.png
+│   ├── image11.png
+│   ├── image12.png
+│   ├── image13.png
+│   ├── image14.png
+│   ├── image16.png
+│   ├── image21.png
+│   ├── image24.png
+│   ├── image27.png
+│   ├── image29.png
+│   ├── image31.png
+│   ├── image34.png
+│   ├── image37.png
+│   ├── image39.png
+│   └── image42.png
+└── ...
+```
+
+The `images` directory should be placed at the **same level as `README.md`**.
+
+---
+
+# Demo
+
+The project report provides a demonstration video of the implemented system:
+
+**[Demo Video](https://drive.google.com/file/d/1pdINrIJIYEZ2lMB8yEEwDSlJpHKLOJkq/view?usp=drive_link)**
+
+The demo covers the operation of the STM32-controlled WS2812B LED system and its music-reactive modes. fileciteturn5file0L510-L517
