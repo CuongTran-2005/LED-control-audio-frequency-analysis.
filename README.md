@@ -182,9 +182,9 @@ $$
 
 Direct DFT computation has approximately:
 
-\[
+%%
 O(N^2)
-\]
+%%
 
 computational complexity.
 
@@ -194,11 +194,11 @@ computational complexity.
 
 FFT is an efficient algorithm for computing the DFT.
 
-Instead of the \(O(N^2)\) complexity of direct DFT, FFT reduces the computational complexity to approximately:
+Instead of the %O(N^2)% complexity of direct DFT, FFT reduces the computational complexity to approximately:
 
-\[
+$$
 O(N\log N)
-\]
+$$
 
 This makes FFT suitable for real-time signal analysis on an MCU. fileciteturn5file0L223-L231
 
@@ -208,7 +208,7 @@ This makes FFT suitable for real-time signal analysis on an MCU. filecitet
 
 The project uses the Radix-2 FFT concept.
 
-For \(N\) being a power of two, the input is divided into:
+For $N$ being a power of two, the input is divided into:
 
 ```text
 Input Signal
@@ -236,9 +236,9 @@ The algorithm repeatedly divides the signal into even and odd-indexed samples, c
 
 The FFT produces complex frequency-domain values:
 
-\[
+$$
 X[k] = Re\{X[k]\}+jIm\{X[k]\}
-\]
+$$
 
 From these values, the magnitude of each frequency component can be calculated.
 
@@ -385,9 +385,9 @@ The project uses **PWM + DMA** to generate the required WS2812B timing while red
 
 For 60 LEDs:
 
-\[
+$$
 60\times24=1440\text{ data bits}
-\]
+$$
 
 The transmission buffer therefore contains the PWM representation of these bits plus additional slots used to create the reset interval.
 
