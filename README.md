@@ -176,9 +176,9 @@ The Discrete Fourier Transform converts a discrete signal from the time domain i
 
 For a signal $x[n]$, the DFT is:
 
-\[
+$$
 X[k]=\sum_{n=0}^{N-1}x[n]e^{-j2\pi kn/N}
-\]
+$$
 
 Direct DFT computation has approximately:
 
