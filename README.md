@@ -499,9 +499,9 @@ The LED-control algorithm converts the color value of each LED into a PWM wavefo
 
 Each LED requires:
 
-\[
+$$
 24\text{ bits}=8G+8R+8B
-\]
+$$
 
 The data is sent in **GRB order**.
 
