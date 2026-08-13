@@ -56,16 +56,16 @@ GRB = Green + Red + Blue
 For a strip containing `N` LEDs, the MCU transmits:
 
 \[
-24N \text{ bits}
+24 * N {bits}
 \]
 
 For the 60-LED strip used in this project:
 
 \[
-24 \times 60 = 1440\text{ bits/frame}
+24 * 60 = 1440 {bits/frame}
 \]
 
-The report specifies that each bit occupies approximately **1.25 µs**. fileciteturn5file0L167-L179
+The report specifies that each bit occupies approximately **1.25 µs**.
 
 ---
 
@@ -89,7 +89,7 @@ LOW  ≈ 0.45–0.55 µs
 Total ≈ 1.25 µs
 ```
 
-The report uses the same approximately 1.25 µs bit period for both logic states, while changing the HIGH/LOW ratio to represent `0` or `1`. fileciteturn5file0L181-L193
+The report uses the same approximately 1.25 µs bit period for both logic states, while changing the HIGH/LOW ratio to represent `0` or `1`.
 
 ### Timing concept
 
@@ -174,7 +174,7 @@ The advanced part of the project uses **FFT (Fast Fourier Transform)** to analyz
 
 The Discrete Fourier Transform converts a discrete signal from the time domain into the frequency domain.
 
-For a signal \(x[n]\), the DFT is:
+For a signal $x[n]$, the DFT is:
 
 \[
 X[k]=\sum_{n=0}^{N-1}x[n]e^{-j2\pi kn/N}
